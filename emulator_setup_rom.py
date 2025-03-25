@@ -15,6 +15,53 @@ import sys
 import time
 import argparse
 from morphcloud.api import MorphCloudClient
+import requests
+import hashlib
+import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get API key from environment
+MORPH_API_KEY = os.getenv('MORPH_API_KEY')
+if not MORPH_API_KEY:
+    raise ValueError("MORPH_API_KEY must be set in .env file")
+
+ROM_PATH = sys.argv[1]
+
+def calculate_rom_hash(rom_path):
+    sha256_hash = hashlib.sha256()
+    with open(rom_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+def setup_rom():
+    rom_hash = calculate_rom_hash(ROM_PATH)
+    
+    headers = {
+        "Authorization": f"Bearer {MORPH_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "rom_hash": rom_hash,
+        "rom_path": ROM_PATH
+    }
+    
+    response = requests.post(
+        "https://api.morph.ai/v1/emulator/setup",
+        headers=headers,
+        json=data
+    )
+    
+    if response.status_code == 200:
+        print("ROM setup successful!")
+        print(json.dumps(response.json(), indent=2))
+    else:
+        print(f"Error setting up ROM: {response.status_code}")
+        print(response.text)
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -64,6 +111,7 @@ def upload_rom_via_sftp(instance, local_path):
         if sftp:
             sftp.close()
         ssh_client.close()
+
 def setup_auto_load_rom(instance, rom_path):
     """Configure BizHawk to automatically load the ROM at startup"""
     print("\n=== 🎮 Configuring BizHawk to auto-load ROM ===")
@@ -154,6 +202,16 @@ def automate_initial_interactions(instance):
     print("✅ Initial interactions completed")
 
 def main():
+    if len(sys.argv) != 2:
+        print("Usage: python emulator_setup_rom.py <rom_path>")
+        sys.exit(1)
+    
+    if not os.path.exists(ROM_PATH):
+        print(f"Error: ROM file not found at {ROM_PATH}")
+        sys.exit(1)
+    
+    setup_rom()
+    
     args = parse_arguments()
     
     # Create client (will use MORPH_API_KEY from environment)
