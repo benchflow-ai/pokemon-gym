@@ -1,88 +1,122 @@
-# Pokemon Emulator Setup
+# Claude Pokemon Player
 
-This repository contains a script to set up a cloud-based Pokemon emulator environment using Morph Cloud. The script creates a virtual machine with a remote desktop environment, installs BizHawk emulator, and configures it to run your Pokemon ROM.
+This project lets Claude (Anthropic's AI assistant) play Pokemon games using Morph Cloud's emulator infrastructure. Claude analyzes screenshots of the game in real-time, makes decisions about what buttons to press, and maintains a memory system to remember important information about the game.
+
+## Project Structure
+
+- `run.py`: Main entry point for the application
+- `emulator_setup_rom.py`: Handles setting up the Morph Cloud environment with BizHawk emulator
+- `claude.py`: Contains the Claude gameplay logic and memory system
 
 ## Prerequisites
 
-- Python 3.6+
-- [uv](https://github.com/astral-sh/uv) - Fast Python package installer and resolver
-- A valid Morph Cloud API key
-- Pokemon ROM file (e.g., Pokemon Red.gb)
+- Python 3.7+
+- A Morph Cloud API key (get one at [cloud.morph.so](https://cloud.morph.so))
+- An Anthropic API key (get one at [console.anthropic.com](https://console.anthropic.com))
+- A Pokemon ROM file (.gb or .gbc format for Game Boy/Game Boy Color games)
 
 ## Installation
 
 1. Clone this repository:
 
-   ```bash
-   git clone https://github.com/yourusername/pokemon-gym.git
-   cd pokemon-gym
-   ```
+```bash
+git clone https://github.com/yourusername/pokemon-gym.git
+cd pokemon-gym
+```
 
-2. Install dependencies with uv:
-   ```bash
-   uv pip install morphcloud
-   ```
+2. Install the required dependencies:
+
+```bash
+pip install morphcloud anthropic python-dotenv requests
+```
+
+3. Create a `.env` file in the project root with your API keys:
+
+```
+MORPH_API_KEY=your_morph_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
+CLAUDE_MODEL=claude-3-7-sonnet-20250219  # Or another Claude model
+```
 
 ## Usage
 
-To run the emulator setup with your Pokemon ROM:
+### Setting up the Emulator Only
+
+To set up the emulator without starting Claude:
 
 ```bash
-uv run emulator_setup_rom.py --rom ~/Downloads/Pokemon\ Red.gb
+python run.py --rom path/to/pokemon_game.gbc --setup-only
 ```
 
-The script will:
+This will:
 
-1. Create or use a cached snapshot with a desktop environment
-2. Set up BizHawk emulator
-3. Upload your ROM file
-4. Configure the emulator to auto-load your ROM
-5. Provide you with a URL to access the remote desktop environment
+1. Create a Morph Cloud VM with a desktop environment
+2. Install the BizHawk emulator
+3. Upload and configure your ROM
+4. Provide a URL to access the emulator via your browser
 
-## Project Structure
+### Running the Full Claude Player
 
-```
-pokemon-gym/
-├── .gitignore          # Git ignore rules
-├── LICENSE            # MIT License
-├── README.md          # This file
-├── emulator_setup_rom.py # Main setup script
-└── requirements.txt   # Python dependencies
-```
-
-## Features
-
-- Remote desktop environment with XFCE
-- BizHawk emulator pre-installed
-- Automatic ROM loading
-- Cached snapshots for faster setup
-- Secure SFTP for ROM uploads
-- noVNC for browser-based access
-
-## Troubleshooting
-
-If you encounter any issues, check the console output for error messages. You can SSH into the instance for troubleshooting using:
+To set up the emulator and let Claude play the game:
 
 ```bash
-morphcloud instance ssh <instance_id>
+python run.py --rom path/to/pokemon_game.gbc
 ```
 
-Where `<instance_id>` is the instance ID displayed in the script output.
+Additional options:
 
-Common issues:
+- `--max-turns 200`: Set a maximum number of turns (default: 100)
+- `--snapshot snapshot_id`: Use an existing Morph Cloud snapshot instead of creating a new environment
 
-1. **ROM Not Found**: Ensure the ROM file path is correct and the file exists
-2. **Permission Issues**: Check if you have the necessary permissions to access the ROM file
-3. **Connection Issues**: Verify your internet connection and Morph Cloud API key
+### Using an Existing Snapshot
+
+If you've already set up the emulator and want to continue from a snapshot:
+
+```bash
+python run.py --snapshot your_snapshot_id
+```
+
+## How It Works
+
+1. **Emulator Setup**: The project creates a cloud VM with a desktop environment, BizHawk emulator, and a web-based VNC client.
+
+2. **Screenshot Analysis**: Claude receives screenshots of the game and analyzes them to understand the current game state.
+
+3. **Decision Making**: Claude decides which buttons to press based on its understanding of the game and Pokemon mechanics.
+
+4. **Memory System**: Claude maintains a memory system to remember important information about the game, such as:
+
+   - Items collected
+   - NPCs encountered
+   - Locations visited
+   - Pokemon in the team and their stats
+   - Active quests
+   - Game mechanics
+
+5. **Continuous Play**: Claude plays through the game turn by turn, with each turn consisting of:
+   - Receiving a screenshot
+   - Deciding on actions
+   - Sending button inputs
+   - Observing the results
 
 ## Contributing
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Inspired by the [ClaudePlayer](https://github.com/jmurth1234/ClaudePlayer) project
+- Uses [Morph Cloud](https://cloud.morph.so) for cloud infrastructure
+- Uses [BizHawk](https://github.com/TASEmulators/BizHawk) emulator for gameplay
+- Powered by [Claude](https://www.anthropic.com/claude) from Anthropic
+
+## Output Locations
+
+- **Logs**: Log files are saved in the `logs` directory
+- **Screenshots**: Screenshots of the game are saved in the `screenshots` directory
+- **Data**: Conversation history and memory data are saved in the `data` directory
+- **Emulator Access**: When running, the script will output a URL where you can view the emulator in your browser

@@ -1,5 +1,3 @@
 morphcloud
-anthropic
-python-dotenv
-pillow
-pyautogui
+anthropic>=0.15.0
+dotenv
