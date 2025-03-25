@@ -24,6 +24,7 @@ wheels/
 venv/
 env/
 ENV/
+.venv/
 
 # IDE
 .idea/
@@ -34,9 +35,6 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-
-# Environment Variables
-.env
 
 # Environment Variables
 .env 
