@@ -1,7 +1,5 @@
 # Claude Pokemon Player
 
-This project lets Claude (Anthropic's AI assistant) play Pokemon games using Morph Cloud's emulator infrastructure. Claude analyzes screenshots of the game in real-time, makes decisions about what buttons to press, and maintains a memory system to remember important information about the game.
-
 ## Project Structure
 
 - `run.py`: Main entry point for the application
@@ -10,7 +8,6 @@ This project lets Claude (Anthropic's AI assistant) play Pokemon games using Mor
 
 ## Prerequisites
 
-- Python 3.7+
 - A Morph Cloud API key (get one at [cloud.morph.so](https://cloud.morph.so))
 - An Anthropic API key (get one at [console.anthropic.com](https://console.anthropic.com))
 - A Pokemon ROM file (.gb or .gbc format for Game Boy/Game Boy Color games)
@@ -20,14 +17,14 @@ This project lets Claude (Anthropic's AI assistant) play Pokemon games using Mor
 1. Clone this repository:
 
 ```bash
-git clone https://github.com/yourusername/pokemon-gym.git
+git clone https://github.com/benchflow-ai/pokemon-gym.git
 cd pokemon-gym
 ```
 
 2. Install the required dependencies:
 
 ```bash
-pip install morphcloud anthropic python-dotenv requests
+pip install morphcloud anthropic dotenv
 ```
 
 3. Create a `.env` file in the project root with your API keys:
@@ -35,7 +32,8 @@ pip install morphcloud anthropic python-dotenv requests
 ```
 MORPH_API_KEY=your_morph_api_key
 ANTHROPIC_API_KEY=your_anthropic_api_key
-CLAUDE_MODEL=claude-3-7-sonnet-20250219  # Or another Claude model
+CLAUDE_MODEL=claude-3-7-sonnet-20250219
+ROM_PATH=your_rom_path
 ```
 
 ## Usage
@@ -45,7 +43,7 @@ CLAUDE_MODEL=claude-3-7-sonnet-20250219  # Or another Claude model
 To set up the emulator without starting Claude:
 
 ```bash
-python run.py --rom path/to/pokemon_game.gbc --setup-only
+python run.py --rom $ROM_PATH --setup-only
 ```
 
 This will:
@@ -98,21 +96,6 @@ python run.py --snapshot your_snapshot_id
    - Deciding on actions
    - Sending button inputs
    - Observing the results
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Inspired by the [ClaudePlayer](https://github.com/jmurth1234/ClaudePlayer) project
-- Uses [Morph Cloud](https://cloud.morph.so) for cloud infrastructure
-- Uses [BizHawk](https://github.com/TASEmulators/BizHawk) emulator for gameplay
-- Powered by [Claude](https://www.anthropic.com/claude) from Anthropic
 
 ## Output Locations
 
