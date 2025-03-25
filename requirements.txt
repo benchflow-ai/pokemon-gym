@@ -1,1 +1,5 @@
 morphcloud
+anthropic
+python-dotenv
+pillow
+pyautogui
