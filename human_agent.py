@@ -81,7 +81,7 @@ class HumanAgent:
                     "sound": sound
                 }
             )
-            
+            print(response.json())
             response.raise_for_status()
             self.current_state = response.json()
             

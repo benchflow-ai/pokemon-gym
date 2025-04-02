@@ -1,8 +1,10 @@
+import os
+import sys
+
 import argparse
 import base64
 import io
 import logging
-import os
 import time
 import csv
 import datetime
@@ -11,8 +13,11 @@ import threading
 import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from PIL import Image
+import cv2
+import numpy as np
 
 from pokemon_env import PokemonEnvironment
 from pokemon_env.action import Action, PressKey, Wait, ActionType
@@ -51,10 +56,11 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],  # 明确指定允许的前端域名
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # WebSocket connection manager
@@ -65,16 +71,19 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        logger.info(f"New WebSocket connection. Total connections: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        logger.info(f"WebSocket connection closed. Total connections: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
-                logger.error("Failed to send message to WebSocket client")
+            except Exception as e:
+                logger.error(f"Failed to send message to WebSocket client: {e}")
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -263,6 +272,9 @@ async def websocket_endpoint(websocket: WebSocket):
             # Keep connection alive
             await websocket.receive_text()
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
 # API Endpoints
@@ -577,6 +589,24 @@ async def get_evaluation():
             "items": list(EVALUATOR.locations_visited)
         }
     }
+
+# Add new endpoint for video stream
+@app.get("/video-stream")
+async def video_stream():
+    async def generate_frames():
+        while True:
+            if ENV and ENV.emulator:
+                # Get the current frame from the emulator
+                frame = ENV.emulator.get_screen()
+                if frame is not None:
+                    # Convert frame to JPEG
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    frame_bytes = buffer.tobytes()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            await asyncio.sleep(0.033)  # ~30 FPS
+
+    return StreamingResponse(generate_frames(), media_type='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pokemon Evaluator API Server")
