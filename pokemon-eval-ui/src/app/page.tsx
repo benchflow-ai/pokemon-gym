@@ -124,7 +124,7 @@ export default function Home() {
             fontFamily: 'inherit',
           }}
         >
-          Claude Plays Pokémon
+          Pokémon Gym
         </Typography>
         {/* Control buttons */}
         <Box sx={{
