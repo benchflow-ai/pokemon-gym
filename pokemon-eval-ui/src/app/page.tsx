@@ -108,24 +108,12 @@ export default function Home() {
     >
       {/* Header */}
       <Box sx={{
-        textAlign: 'center',
         mb: 2,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
+        justifyContent: 'flex-end',
         gap: 2,
       }}>
-        <Typography
-          variant="h1"
-          sx={{
-            fontSize: '24px',
-            color: '#fff',
-            textShadow: '2px 2px 0px rgba(0,0,0,0.5)',
-            fontFamily: 'inherit',
-          }}
-        >
-          Pokémon Gym
-        </Typography>
         {/* Control buttons */}
         <Box sx={{
           display: 'flex',
