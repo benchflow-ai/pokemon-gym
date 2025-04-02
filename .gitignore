@@ -48,7 +48,6 @@ ENV/
 
 # System
 .DS_Store
-
-Pokemon*
+*.gb*
 gameplay_sessions/
 evaluation_sessions/

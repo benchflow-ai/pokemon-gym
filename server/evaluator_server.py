@@ -7,37 +7,36 @@ import time
 import csv
 import datetime
 from typing import Dict, List, Any, Optional
-import threading  # For the timeout timer
-
-import uvicorn
-from fastapi import FastAPI, HTTPException
+import threading
+import asyncio
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
 
 from pokemon_env import PokemonEnvironment
 from pokemon_env.action import Action, PressKey, Wait, ActionType
-from .evaluate import PokemonEvaluator  # Import the evaluator class
+from .evaluate import PokemonEvaluator
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 # Global variables
-ROM_PATH = "Pokemon_Red.gb"  # Default ROM path
+ROM_PATH = "Pokemon_Red.gb"
 ENV = None
 CSV_WRITER = None
 CSV_FILE = None
 LAST_RESPONSE_TIME = None
-EVALUATOR = None  # Add evaluator instance variable
-SESSION_START_TIME = None  # Track when the session started
-SESSION_TIMER = None  # Timer to track 30 minute limit
-MAX_SESSION_DURATION = 5 * 60  # 30 minutes in seconds
+EVALUATOR = None
+SESSION_START_TIME = None
+SESSION_TIMER = None
+MAX_SESSION_DURATION = 5 * 60  # 5 minutes in seconds
 
 # Output directory structure
-OUTPUT_DIR = "gameplay_sessions"  # Base directory for all sessions
-current_session_dir = None  # Current session directory
-IMAGES_FOLDER = "images"  # Subfolder name for images within the session directory
+OUTPUT_DIR = "gameplay_sessions"
+current_session_dir = None
+IMAGES_FOLDER = "images"
 
 # Create base output directory if it doesn't exist
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -58,20 +57,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-# Models for API requests and responses
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                logger.error("Failed to send message to WebSocket client")
+
+manager = ConnectionManager()
+
+# Models
 class InitializeRequest(BaseModel):
     headless: bool = True
     sound: bool = False
 
-
 class ActionRequest(BaseModel):
-    action_type: str  # "press_key" or "wait"
-    # For press_key
+    action_type: str
     keys: Optional[List[str]] = None
-    # For wait
     frames: Optional[int] = None
-
+    reasoning: Optional[str] = None
 
 class GameStateResponse(BaseModel):
     player_name: str
@@ -82,14 +98,13 @@ class GameStateResponse(BaseModel):
     badges: List[str]
     valid_moves: List[str]
     inventory: List[Dict[str, Any]]
-    dialog: None | str
+    dialog: Optional[str]
     pokemons: List[Dict[str, Any]]
     screenshot_base64: str
-    collision_map: None | str
+    collision_map: Optional[str]
     step_number: int
     execution_time: float
-    score: float = 0.0  # Add a score field to the response
-
+    score: float = 0.0
 
 def setup_session_directory():
     """Create a new directory for the current gameplay session."""
@@ -110,7 +125,6 @@ def setup_session_directory():
     logger.info(f"Created session directory: {session_dir}")
     
     return session_dir
-
 
 def save_screenshot(screenshot_base64: str, step_number: int, action_type: str) -> None:
     """
@@ -135,7 +149,6 @@ def save_screenshot(screenshot_base64: str, step_number: int, action_type: str) 
         logger.info(f"Screenshot saved to {filename}")
     except Exception as e:
         logger.error(f"Error saving screenshot: {e}")
-
 
 def initialize_csv_logger(custom_filename=None):
     """Initialize the CSV logger within the session directory."""
@@ -162,7 +175,6 @@ def initialize_csv_logger(custom_filename=None):
         if CSV_FILE:
             CSV_FILE.close()
             CSV_FILE = None
-
 
 def log_response(response: GameStateResponse, action_type: str, action_details: Any):
     """Log a response to the CSV file."""
@@ -206,7 +218,6 @@ def log_response(response: GameStateResponse, action_type: str, action_details: 
     except Exception as e:
         logger.error(f"Error logging to CSV: {e}")
 
-
 def force_stop_session():
     """Force stop the current session after timeout."""
     global ENV, CSV_FILE, CSV_WRITER, EVALUATOR, SESSION_START_TIME, SESSION_TIMER
@@ -236,19 +247,28 @@ def force_stop_session():
     except Exception as e:
         logger.error(f"Error during forced session stop: {e}")
 
+async def broadcast_game_state(state: GameStateResponse, action: Optional[Dict] = None):
+    """Broadcast game state to all connected WebSocket clients"""
+    await manager.broadcast({
+        "state": state.model_dump(),
+        "action": action
+    })
+
+# WebSocket endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 # API Endpoints
 @app.post("/initialize", response_model=GameStateResponse)
 async def initialize(request: InitializeRequest):
-    """
-    Initialize the Pokemon environment and return the initial state.
-    
-    Args:
-        request: Initialization parameters
-    
-    Returns:
-        The initial game state
-    """
+    """Initialize the Pokemon environment and return the initial state."""
     global ENV, LAST_RESPONSE_TIME, EVALUATOR, SESSION_START_TIME, SESSION_TIMER
     
     # Cancel any existing timer
@@ -266,25 +286,15 @@ async def initialize(request: InitializeRequest):
     
     # Set up a new session directory
     setup_session_directory()
-    
-    # Initialize CSV logger in the new session directory
     initialize_csv_logger()
-    
-    # Initialize the evaluator
     EVALUATOR = PokemonEvaluator()
-    
-    # Reset the last response time
     LAST_RESPONSE_TIME = time.time()
     SESSION_START_TIME = time.time()
     
     # Check if ROM file exists
     if not os.path.exists(ROM_PATH):
-        raise HTTPException(
-            status_code=500, 
-            detail=f"ROM file not found: {ROM_PATH}"
-        )
+        raise HTTPException(status_code=500, detail=f"ROM file not found: {ROM_PATH}")
     
-    # Initialize environment
     try:
         logger.info(f"Initializing environment with ROM: {ROM_PATH}")
         ENV = PokemonEnvironment(
@@ -292,20 +302,16 @@ async def initialize(request: InitializeRequest):
             headless=request.headless,
             sound=request.sound
         )
-        logger.info("env initialized")
         
-        # Get initial state
         state = ENV.state
-        logger.info("state initialized")
         collision_map = ENV.get_collision_map()
         
-        # Prepare response
         response = GameStateResponse(
             player_name=state.player_name,
             rival_name=state.rival_name,
             money=state.money,
             location=state.location,
-            coordinates=list(state.coordinates),  # Convert tuple to list
+            coordinates=list(state.coordinates),
             badges=state.badges,
             valid_moves=state.valid_moves,
             inventory=state.inventory,
@@ -315,55 +321,39 @@ async def initialize(request: InitializeRequest):
             collision_map=collision_map,
             step_number=0,
             execution_time=0.0,
-            score=0.0  # Initial score
+            score=0.0
         )
         
-        # Log initial state
-        log_response(response, "initialize", request)
+        log_response(response, "initialize", None)
         
-        # Update score after evaluating initial state
         if EVALUATOR:
             response.score = EVALUATOR.total_score
         
-        # Save initial screenshot explicitly
         save_screenshot(response.screenshot_base64, 0, "initial")
         
-        # Set up a timer to automatically stop the session after 30 minutes
         SESSION_TIMER = threading.Timer(MAX_SESSION_DURATION, force_stop_session)
-        SESSION_TIMER.daemon = True  # Allow the timer to be terminated when the program exits
+        SESSION_TIMER.daemon = True
         SESSION_TIMER.start()
-        logger.info(f"Session will automatically terminate in {MAX_SESSION_DURATION/60} minutes")
+        
+        # Broadcast initial state through WebSocket
+        await broadcast_game_state(response)
         
         return response
-    
+        
     except Exception as e:
         logger.error(f"Error initializing environment: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to initialize environment: {str(e)}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"Failed to initialize environment: {str(e)}")
 
 @app.post("/action", response_model=GameStateResponse)
 async def take_action(request: ActionRequest):
-    """
-    Take an action in the environment and return the new state.
-    
-    Args:
-        request: Action parameters
-    
-    Returns:
-        The new game state after taking the action
-    """
+    """Take an action in the environment and return the new state."""
     global ENV, LAST_RESPONSE_TIME, EVALUATOR, SESSION_START_TIME
     
-    # Check if session has timed out
     if SESSION_START_TIME is None or time.time() - SESSION_START_TIME > MAX_SESSION_DURATION:
-        # Force stop if not already stopped
         if ENV:
             force_stop_session()
         
-        return GameStateResponse(
+        response = GameStateResponse(
             player_name="",
             rival_name="",
             money=0,
@@ -372,7 +362,7 @@ async def take_action(request: ActionRequest):
             badges=[],
             valid_moves=[],
             inventory=[],
-            dialog="Session has timed out after 30 minutes. Please initialize a new session.",
+            dialog="Session has timed out. Please initialize a new session.",
             pokemons=[],
             screenshot_base64="",
             collision_map=None,
@@ -380,67 +370,41 @@ async def take_action(request: ActionRequest):
             execution_time=0.0,
             score=EVALUATOR.total_score if EVALUATOR else 0.0
         )
+        
+        await broadcast_game_state(response)
+        return response
     
-    # Calculate execution time (time since last response)
     current_time = time.time()
-    if LAST_RESPONSE_TIME is None:
-        execution_time = 0.0  # First action has no previous time
-    else:
-        execution_time = current_time - LAST_RESPONSE_TIME
+    execution_time = current_time - LAST_RESPONSE_TIME if LAST_RESPONSE_TIME else 0.0
     
-    # Check if environment is initialized
     if ENV is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Environment not initialized. Call /initialize first."
-        )
+        raise HTTPException(status_code=400, detail="Environment not initialized. Call /initialize first.")
     
-    logger.info(f"Taking action: {request.action_type}")
-    logger.info(f"Keys: {request.keys}")
-    logger.info(f"Frames: {request.frames}")
-    
-    # Create action based on request
     try:
         if request.action_type == "press_key":
             if not request.keys:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Keys parameter is required for press_key action."
-                )
-            logger.info(f"Creating PressKey action with keys: {request.keys}")
+                raise HTTPException(status_code=400, detail="Keys parameter is required for press_key action.")
             action = PressKey(keys=request.keys)
             action_details = {"keys": request.keys}
         
         elif request.action_type == "wait":
             if not request.frames:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Frames parameter is required for wait action."
-                )
-            
+                raise HTTPException(status_code=400, detail="Frames parameter is required for wait action.")
             action = Wait(frames=request.frames)
             action_details = {"frames": request.frames}
         
         else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown action type: {request.action_type}"
-            )
+            raise HTTPException(status_code=400, detail=f"Unknown action type: {request.action_type}")
         
-        # Execute action
         state = ENV.step(action)
-        
-        # Get collision map and valid moves
         collision_map = ENV.get_collision_map()
-        valid_moves = ENV.get_valid_moves()
         
-        # Prepare response
         response = GameStateResponse(
             player_name=state.player_name,
             rival_name=state.rival_name,
             money=state.money,
             location=state.location,
-            coordinates=list(state.coordinates),  # Convert tuple to list
+            coordinates=list(state.coordinates),
             badges=state.badges,
             valid_moves=state.valid_moves,
             inventory=state.inventory,
@@ -449,29 +413,30 @@ async def take_action(request: ActionRequest):
             screenshot_base64=state.screenshot_base64,
             collision_map=collision_map,
             step_number=ENV.steps_taken,
-            execution_time=execution_time,  # Use the calculated time
-            score=EVALUATOR.total_score if EVALUATOR else 0.0  # Add current score
+            execution_time=execution_time,
+            score=EVALUATOR.total_score if EVALUATOR else 0.0
         )
         
-        # Log the action and response
         log_response(response, request.action_type, action_details)
-        
-        # Update the last response time
         LAST_RESPONSE_TIME = time.time()
         
-        # Check remaining time and log it
-        remaining_time = MAX_SESSION_DURATION - (time.time() - SESSION_START_TIME)
-        logger.info(f"Remaining session time: {remaining_time/60:.1f} minutes")
+        # Prepare action info for WebSocket broadcast
+        action_info = {
+            'type': request.action_type,
+            'details': {
+                'button': request.keys[0] if request.action_type == 'press_key' and request.keys else None,
+                'frames': request.frames if request.action_type == 'wait' else None
+            },
+            'reasoning': request.reasoning,
+            'timestamp': int(time.time() * 1000)
+        }
         
+        await broadcast_game_state(response, action_info)
         return response
-    
+        
     except Exception as e:
         logger.error(f"Error taking action: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to take action: {str(e)}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"Failed to take action: {str(e)}")
 
 @app.get("/status")
 async def get_status():
@@ -504,7 +469,6 @@ async def get_status():
         "remaining_time_minutes": remaining_time / 60,
         **score_info  # Include score information
     }
-
 
 @app.post("/stop")
 async def stop_environment():
@@ -585,7 +549,6 @@ async def stop_environment():
             detail=f"Failed to stop environment: {str(e)}"
         )
 
-
 # Add a new endpoint to get the current evaluation
 @app.get("/evaluate")
 async def get_evaluation():
@@ -615,7 +578,6 @@ async def get_evaluation():
         }
     }
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pokemon Evaluator API Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the server on")
@@ -624,9 +586,7 @@ if __name__ == "__main__":
     parser.add_argument("--log-file", type=str, help="Custom CSV filename (optional)")
     
     args = parser.parse_args()
-    
-    # Set ROM path
     ROM_PATH = args.rom
     
-    # Run the server
+    import uvicorn
     uvicorn.run(app, host=args.host, port=args.port) 
