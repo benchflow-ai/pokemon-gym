@@ -162,7 +162,7 @@ export default function Home() {
             fontSize: '14px',
             fontFamily: 'inherit',
           }}>
-            Claude
+            AI Agent
           </Box>
           <AIActionLog actions={actions} />
         </Box>
