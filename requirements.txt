@@ -14,3 +14,4 @@ pydantic>=2.4.2    # For data validation
 pygame==2.6.1      # For game development
 
 benchflow>=0.1.13  # For benchmark management
+opencv-python

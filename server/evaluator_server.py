@@ -21,7 +21,7 @@ import numpy as np
 
 from pokemon_env import PokemonEnvironment
 from pokemon_env.action import Action, PressKey, Wait, ActionType
-from .evaluate import PokemonEvaluator
+from evaluate import PokemonEvaluator
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')

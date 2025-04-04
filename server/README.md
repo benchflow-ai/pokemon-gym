@@ -18,7 +18,7 @@ The server provides the following functionality:
 Start the server using the provided script:
 
 ```bash
-python server.py --host 0.0.0.0 --port 8000 --rom pokemon.gb
+python evaluator_server.py --host 0.0.0.0 --port 8000 --rom pokemon.gb
 ```
 
 Command-line arguments:
