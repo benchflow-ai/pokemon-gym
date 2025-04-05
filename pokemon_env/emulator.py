@@ -4,6 +4,7 @@ import pickle
 from collections import deque
 import heapq
 from typing import Dict, Any
+import time
 
 from .memory_reader import PokemonRedReader, StatusCondition
 from PIL import Image
@@ -57,6 +58,29 @@ class Emulator:
             # Extract the PyBoy state from the full state data
             pyboy_state_io = io.BytesIO(state_data["pyboy_state"])
             self.pyboy.load_state(pyboy_state_io)
+
+    def save_state(self, state_filename):
+        """
+        Save the current emulator state to a file.
+        
+        Args:
+            state_filename: Path where to save the state file
+        """
+        # Save PyBoy state to a BytesIO object
+        pyboy_state_io = io.BytesIO()
+        self.pyboy.save_state(pyboy_state_io)
+        
+        # Create a state data dictionary with the PyBoy state
+        state_data = {
+            "pyboy_state": pyboy_state_io.getvalue(),
+            "timestamp": time.time()
+        }
+        
+        # Save to file
+        with open(state_filename, 'wb') as f:
+            pickle.dump(state_data, f)
+            
+        logger.info(f"Game state saved to {state_filename}")
 
     def press_buttons(self, buttons, wait=True):
         """Press a sequence of buttons on the Game Boy.

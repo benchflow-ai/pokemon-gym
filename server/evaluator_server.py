@@ -33,6 +33,8 @@ EVALUATOR = None  # Add evaluator instance variable
 SESSION_START_TIME = None  # Track when the session started
 SESSION_TIMER = None  # Timer to track 30 minute limit
 MAX_SESSION_DURATION = 4 * 60 * 60  # 30 minutes in seconds
+AUTOSAVE_INTERVAL = 50  # Automatically save every 50 steps
+AUTOSAVE_FILENAME = "autosave.state"  # Filename for autosave
 
 # Output directory structure
 OUTPUT_DIR = "gameplay_sessions"  # Base directory for all sessions
@@ -63,6 +65,7 @@ app.add_middleware(
 class InitializeRequest(BaseModel):
     headless: bool = True
     sound: bool = False
+    load_state_file: Optional[str] = None  # Optional path to a saved state file
 
 
 class ActionRequest(BaseModel):
@@ -89,6 +92,10 @@ class GameStateResponse(BaseModel):
     step_number: int
     execution_time: float
     score: float = 0.0  # Add a score field to the response
+
+
+class SaveStateRequest(BaseModel):
+    filename: Optional[str] = None  # Optional custom filename
 
 
 def setup_session_directory():
@@ -215,6 +222,19 @@ def force_stop_session():
     
     try:
         if ENV:
+            # Save state before stopping
+            try:
+                timeout_save_path = os.path.join(current_session_dir, "timeout_state.state")
+                ENV.save_state(timeout_save_path)
+                logger.info(f"Saved game state at timeout to {timeout_save_path}")
+                
+                # Also update the autosave file
+                autosave_path = os.path.join(current_session_dir, AUTOSAVE_FILENAME)
+                ENV.save_state(autosave_path)
+                logger.info(f"Updated autosave at timeout")
+            except Exception as e:
+                logger.error(f"Error saving game state at timeout: {e}")
+                
             ENV.stop()
             ENV = None
         
@@ -266,6 +286,10 @@ async def initialize(request: InitializeRequest):
     
     # Set up a new session directory
     setup_session_directory()
+
+    # Check if there's an autosave file to load
+    autosave_exists = False
+    autosave_path = os.path.join(current_session_dir, AUTOSAVE_FILENAME)
     
     # Initialize CSV logger in the new session directory
     initialize_csv_logger()
@@ -293,6 +317,23 @@ async def initialize(request: InitializeRequest):
             sound=request.sound
         )
         logger.info("env initialized")
+        
+        # If a state file was provided, load it
+        if request.load_state_file:
+            if not os.path.exists(request.load_state_file):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"State file not found: {request.load_state_file}"
+                )
+            
+            logger.info(f"Loading state from file: {request.load_state_file}")
+            ENV.load_state(request.load_state_file)
+            logger.info("State loaded successfully")
+        else:
+            # We don't look for autosave on first initialization since we just created the directory
+            # Just initialize the emulator
+            ENV.emulator.initialize()
+            logger.info("Emulator initialized")
         
         # Get initial state
         state = ENV.state
@@ -463,6 +504,15 @@ async def take_action(request: ActionRequest):
         # Update the last response time
         LAST_RESPONSE_TIME = time.time()
         
+        # Auto-save every AUTOSAVE_INTERVAL steps
+        if ENV.steps_taken % AUTOSAVE_INTERVAL == 0:
+            try:
+                autosave_path = os.path.join(current_session_dir, AUTOSAVE_FILENAME)
+                ENV.save_state(autosave_path)
+                logger.info(f"Auto-saved game state at step {ENV.steps_taken} to {autosave_path}")
+            except Exception as e:
+                logger.error(f"Error during auto-save: {e}")
+        
         # Check remaining time and log it
         remaining_time = MAX_SESSION_DURATION - (time.time() - SESSION_START_TIME)
         logger.info(f"Remaining session time: {remaining_time/60:.1f} minutes")
@@ -525,6 +575,19 @@ async def stop_environment():
     
     session_path = current_session_dir
     score_summary = {}
+    
+    # Save final game state before stopping
+    try:
+        final_save_path = os.path.join(current_session_dir, "final_state.state")
+        ENV.save_state(final_save_path)
+        logger.info(f"Final game state saved to {final_save_path}")
+        
+        # Also update the autosave file
+        autosave_path = os.path.join(current_session_dir, AUTOSAVE_FILENAME)
+        ENV.save_state(autosave_path)
+        logger.info(f"Updated autosave at session end")
+    except Exception as e:
+        logger.error(f"Error saving final game state: {e}")
     
     # Get final score information
     if EVALUATOR:
@@ -618,6 +681,53 @@ async def get_evaluation():
             "items": list(EVALUATOR.locations_visited)
         }
     }
+
+
+@app.post("/save_state")
+async def save_state(request: SaveStateRequest):
+    """
+    Save the current game state to a file.
+    
+    Args:
+        request: The request containing the optional filename
+        
+    Returns:
+        Path to the saved state file
+    """
+    global ENV, current_session_dir
+    
+    if ENV is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Environment not initialized. Call /initialize first."
+        )
+    
+    try:
+        # If no filename provided, generate one based on timestamp
+        if not request.filename:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            state_filename = f"game_state_{timestamp}.state"
+        else:
+            state_filename = request.filename
+        
+        # Ensure the filename has .state extension
+        if not state_filename.endswith(".state"):
+            state_filename += ".state"
+        
+        # Full path to save the state file in the current session directory
+        state_path = os.path.join(current_session_dir, state_filename)
+        
+        # Save the state
+        ENV.save_state(state_path)
+        
+        return {"status": "success", "state_file": state_path}
+    
+    except Exception as e:
+        logger.error(f"Error saving state: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save state: {str(e)}"
+        )
 
 
 if __name__ == "__main__":

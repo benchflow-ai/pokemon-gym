@@ -159,6 +159,33 @@ class PokemonEnvironment:
             return 0.0
         return sum(self.action_times.values()) / len(self.action_times)
     
+    def save_state(self, state_filename: str) -> None:
+        """
+        Save the current environment state to a file.
+        
+        Args:
+            state_filename: Path to save the state file
+        """
+        self.emulator.save_state(state_filename)
+        logger.info(f"Environment state saved to {state_filename}")
+    
+    def load_state(self, state_filename: str) -> GameState:
+        """
+        Load environment state from a file.
+        
+        Args:
+            state_filename: Path to the state file to load
+            
+        Returns:
+            The game state after loading the saved state
+        """
+        self.emulator.load_state(state_filename)
+        logger.info(f"Environment state loaded from {state_filename}")
+        
+        # Update current state after loading
+        self._current_state = self._get_current_state()
+        return self._current_state
+    
     def stop(self):
         """Stop the environment."""
         self.emulator.stop() 
