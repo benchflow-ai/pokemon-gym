@@ -25,10 +25,13 @@ KEY_MAPPING = {
     pygame.K_RETURN: "start",  # Enter key for Start button
     pygame.K_RSHIFT: "select",  # Right Shift for Select button
     pygame.K_SPACE: "wait",  # Space for wait command
+    pygame.K_F5: "save",    # F5 to save state
+    pygame.K_F7: "load",    # F7 to load saved state
 }
 
 # Number of frames to wait when using the wait command
 DEFAULT_WAIT_FRAMES = 30
+DEFAULT_SAVE_FILENAME = "manual_save.state"
 
 class HumanAgent:
     """Human Agent that allows keyboard control of Pokemon Red through the evaluator server"""
@@ -46,6 +49,8 @@ class HumanAgent:
         self.current_state = None
         self.running = True
         self.step_count = 0
+        self.score = 0.0
+        self.saved_state_path = None
         
         # Initialize pygame for display and keyboard input
         pygame.init()
@@ -59,13 +64,16 @@ class HumanAgent:
         # For showing info text
         self.font = pygame.font.SysFont('Arial', 14)
         
-    def initialize(self, headless: bool = False, sound: bool = False) -> Dict[str, Any]:
+    def initialize(self, headless: bool = False, sound: bool = False, 
+                  load_state_file: str = None, load_autosave: bool = False) -> Dict[str, Any]:
         """
         Initialize the game environment
         
         Args:
             headless: Whether to run without a GUI
             sound: Whether to enable sound
+            load_state_file: Optional path to a saved state file to load
+            load_autosave: Whether to load the latest autosave
             
         Returns:
             Initial game state
@@ -73,13 +81,22 @@ class HumanAgent:
         try:
             logger.info("Initializing environment...")
             
+            # Prepare initialization parameters
+            init_params = {
+                "headless": headless,
+                "sound": sound,
+                "load_autosave": load_autosave
+            }
+            
+            # Add load_state_file if provided
+            if load_state_file:
+                init_params["load_state_file"] = load_state_file
+                logger.info(f"Will try to load state from {load_state_file}")
+            
             response = self.session.post(
                 f"{self.server_url}/initialize",
                 headers={"Content-Type": "application/json"},
-                json={
-                    "headless": headless,
-                    "sound": sound
-                }
+                json=init_params
             )
             
             response.raise_for_status()
@@ -87,6 +104,14 @@ class HumanAgent:
             
             # Set initialization flag
             self.initialized = True
+            
+            # Set initial score
+            if 'score' in self.current_state:
+                self.score = self.current_state['score']
+            
+            # Set the initial saved state path if loading from a file
+            if load_state_file:
+                self.saved_state_path = load_state_file
             
             logger.info(f"Initialization successful, location: {self.current_state['location']}")
             
@@ -132,6 +157,10 @@ class HumanAgent:
             self.current_state = response.json()
             self.step_count += 1
             
+            # Update score
+            if 'score' in self.current_state:
+                self.score = self.current_state['score']
+            
             # Update the display with the new state
             self.update_display(self.current_state)
             
@@ -139,6 +168,48 @@ class HumanAgent:
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Action execution error: {e}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Server response: {e.response.text}")
+            raise
+    
+    def save_state(self, filename: str = None) -> Dict[str, Any]:
+        """
+        Save the current game state
+        
+        Args:
+            filename: Optional custom filename for the state
+            
+        Returns:
+            Response from the server
+        """
+        if not self.initialized:
+            raise RuntimeError("Environment not initialized")
+        
+        try:
+            # Prepare request data
+            request_data = {}
+            if filename:
+                request_data["filename"] = filename
+            
+            # Send request
+            response = self.session.post(
+                f"{self.server_url}/save_state",
+                headers={"Content-Type": "application/json"},
+                json=request_data
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Store the saved state path
+            if 'state_file' in result:
+                self.saved_state_path = result['state_file']
+                logger.info(f"Game state saved to {self.saved_state_path}")
+            
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Save state error: {e}")
             if hasattr(e, 'response') and e.response:
                 logger.error(f"Server response: {e.response.text}")
             raise
@@ -167,7 +238,8 @@ class HumanAgent:
             self.screen.blit(pygame_image, (0, 0))
             
             # Display information text
-            location_text = self.font.render(f"Location: {state['location']} | Coordinates: {state['coordinates']} | Step: {self.step_count}", True, (255, 255, 255))
+            info_text = f"Location: {state['location']} | Coordinates: {state['coordinates']} | Step: {self.step_count} | Score: {self.score:.1f}"
+            location_text = self.font.render(info_text, True, (255, 255, 255))
             
             # Add a semi-transparent background for text readability
             text_bg = pygame.Surface((location_text.get_width(), location_text.get_height()))
@@ -177,7 +249,7 @@ class HumanAgent:
             self.screen.blit(location_text, (5, 5))
             
             # Add control instructions at the bottom
-            controls_text = self.font.render("Controls: Arrow Keys = Move | Z = A | X = B | Enter = Start | R-Shift = Select | Space = Wait", True, (255, 255, 255))
+            controls_text = self.font.render("Controls: Arrows = Move | Z = A | X = B | Enter = Start | R-Shift = Select | Space = Wait | F5 = Save | F7 = Load", True, (255, 255, 255))
             controls_bg = pygame.Surface((controls_text.get_width(), controls_text.get_height()))
             controls_bg.set_alpha(128)
             controls_bg.fill((0, 0, 0))
@@ -215,6 +287,17 @@ class HumanAgent:
                                 # Execute wait action
                                 logger.info(f"Waiting for {DEFAULT_WAIT_FRAMES} frames")
                                 self.take_action("wait", frames=DEFAULT_WAIT_FRAMES)
+                            elif key == "save":
+                                # Save game state
+                                logger.info("Saving game state...")
+                                self.save_state(DEFAULT_SAVE_FILENAME)
+                            elif key == "load":
+                                # Load saved game state
+                                if self.saved_state_path:
+                                    logger.info(f"Loading game state from {self.saved_state_path}...")
+                                    self.initialize(headless=False, sound=True, load_state_file=self.saved_state_path)
+                                else:
+                                    logger.warning("No saved state available to load")
                             else:
                                 # Execute press key action
                                 logger.info(f"Pressing key: {key}")
@@ -255,6 +338,8 @@ def main():
     parser = argparse.ArgumentParser(description="Pokemon Human Agent")
     parser.add_argument("--server", type=str, default="http://localhost:8080", help="Evaluation server URL")
     parser.add_argument("--sound", action="store_true", help="Enable sound")
+    parser.add_argument("--load-state", type=str, help="Path to a saved state file to load")
+    parser.add_argument("--load-autosave", action="store_true", help="Load the latest autosave")
     
     args = parser.parse_args()
     
@@ -263,7 +348,12 @@ def main():
     
     try:
         # Initialize environment (never headless for human agent)
-        agent.initialize(headless=False, sound=args.sound)
+        agent.initialize(
+            headless=False, 
+            sound=args.sound,
+            load_state_file=args.load_state,
+            load_autosave=args.load_autosave
+        )
         
         # Run Human Agent
         agent.run()

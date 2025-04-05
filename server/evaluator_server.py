@@ -66,6 +66,7 @@ class InitializeRequest(BaseModel):
     headless: bool = True
     sound: bool = False
     load_state_file: Optional[str] = None  # Optional path to a saved state file
+    load_autosave: bool = False  # Whether to load the latest autosave
 
 
 class ActionRequest(BaseModel):
@@ -287,10 +288,6 @@ async def initialize(request: InitializeRequest):
     # Set up a new session directory
     setup_session_directory()
 
-    # Check if there's an autosave file to load
-    autosave_exists = False
-    autosave_path = os.path.join(current_session_dir, AUTOSAVE_FILENAME)
-    
     # Initialize CSV logger in the new session directory
     initialize_csv_logger()
     
@@ -329,11 +326,24 @@ async def initialize(request: InitializeRequest):
             logger.info(f"Loading state from file: {request.load_state_file}")
             ENV.load_state(request.load_state_file)
             logger.info("State loaded successfully")
+        # If explicitly asked to load autosave
+        elif request.load_autosave:
+            autosave_path = os.path.join(current_session_dir, AUTOSAVE_FILENAME)
+            if os.path.exists(autosave_path):
+                try:
+                    logger.info(f"Loading autosave file: {autosave_path}")
+                    ENV.load_state(autosave_path)
+                    logger.info("Autosave loaded successfully")
+                except Exception as e:
+                    logger.error(f"Error loading autosave: {e}. Initializing fresh state.")
+                    ENV.emulator.initialize()
+            else:
+                logger.info("No autosave file found. Initializing fresh state.")
+                ENV.emulator.initialize()
         else:
-            # We don't look for autosave on first initialization since we just created the directory
-            # Just initialize the emulator
+            # Otherwise just initialize fresh
             ENV.emulator.initialize()
-            logger.info("Emulator initialized")
+            logger.info("Initialized fresh game state")
         
         # Get initial state
         state = ENV.state
